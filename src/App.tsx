@@ -1,5 +1,14 @@
 import { useRef, useState } from "react";
 import Papa from "papaparse";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 type RawRow = Record<string, string>;
 
@@ -210,6 +219,27 @@ function App() {
   const retailerOptions = [...new Set((parsed?.rows ?? []).map((row) => row.retailer))].sort();
   const productOptions = [...new Set((parsed?.rows ?? []).map((row) => row.product))].sort();
 
+  function downloadFilteredCsv() {
+    if (!parsed) return;
+    const csv = Papa.unparse(filteredRows.map((row) => row.raw), {
+      columns: parsed.headers,
+    });
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "filtered-sales.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const productSales = Object.values(
+    filteredRows.reduce<Record<string, { product: string; sales: number }>>((groups, row) => {
+      groups[row.product] ??= { product: row.product, sales: 0 };
+      groups[row.product].sales += row.sales;
+      return groups;
+    }, {}),
+  );
+
   return (
     <div className="app-shell">
       <main className="main-content">
@@ -246,7 +276,17 @@ function App() {
           ) : (
             <>
               <section className="file-banner">
-                <strong>{fileName} — {parsed.rows.length.toLocaleString()} valid rows</strong>
+                <div className="file-info">
+                  <div>
+                    <strong>{fileName}</strong>
+                    <span>{parsed.rows.length.toLocaleString()} valid rows</span>
+                  </div>
+                </div>
+                <div className="file-actions">
+                  <button className="button button-primary" onClick={downloadFilteredCsv}>
+                    Download filtered CSV
+                  </button>
+                </div>
               </section>
               {parsed.invalidRows.length > 0 && (
                 <section className="validation-warning">
@@ -345,19 +385,48 @@ function App() {
                   <small>{parsed.hasPromotion ? "Rows marked as promoted" : "No promotion column"}</small>
                 </article>
               </section>
+              <section className="chart-card">
+                <div className="section-heading"><h2>Sales by product</h2></div>
+                {productSales.length > 0 ? (
+                  <div className="chart-wrap">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={productSales}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                        <XAxis dataKey="product" />
+                        <YAxis />
+                        <Tooltip
+                          formatter={(value) =>
+                            Number(value).toLocaleString(undefined, {
+                              style: "currency",
+                              currency: "USD",
+                            })
+                          }
+                        />
+                        <Bar dataKey="sales" fill="#66806b" radius={[3, 3, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div className="empty-chart">No sales data matches the selected filters.</div>
+                )}
+              </section>
               <section className="table-card">
                 <div className="section-heading"><h2>Validated sales rows</h2></div>
                 <div className="table-scroll">
-                  <table>
-                    <thead><tr><th>Date</th><th>Retailer</th><th>Product</th><th>Quantity</th><th>Sales</th></tr></thead>
-                    <tbody>
-                      {filteredRows.map((row, index) => (
-                        <tr key={`${row.date}-${row.retailer}-${index}`}>
-                          <td>{row.date}</td><td>{row.retailer}</td><td>{row.product}</td><td>{row.quantity}</td><td>{row.sales.toLocaleString(undefined, { style: "currency", currency: "USD" })}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  {filteredRows.length > 0 ? (
+                    <table>
+                      <thead><tr><th>Date</th><th>Retailer</th><th>Product</th><th>Quantity</th><th>Sales</th></tr></thead>
+                      <tbody>
+                        {filteredRows.map((row, index) => (
+                          <tr key={`${row.date}-${row.retailer}-${index}`}>
+                            <td>{row.date}</td><td>{row.retailer}</td><td>{row.product}</td><td>{row.quantity}</td><td>{row.sales.toLocaleString(undefined, { style: "currency", currency: "USD" })}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="table-empty">No rows match the selected filters.</div>
+                  )}
                 </div>
               </section>
             </>
