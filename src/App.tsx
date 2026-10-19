@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Papa from "papaparse";
 import {
   Bar,
@@ -33,6 +33,82 @@ type ParsedSales = {
   headers: string[];
   hasPromotion: boolean;
 };
+
+type SavedAnalysis = {
+  version: 1;
+  parsed: ParsedSales;
+  fileName: string;
+};
+
+const STORAGE_KEY = "sales-csv-analysis";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isParsedSales(value: unknown): value is ParsedSales {
+  if (!isRecord(value)) return false;
+  const rows = value.rows;
+  const invalidRows = value.invalidRows;
+  const headers = value.headers;
+  return (
+    Array.isArray(rows) &&
+    rows.every(
+      (row) =>
+        isRecord(row) &&
+        typeof row.date === "string" &&
+        typeof row.retailer === "string" &&
+        typeof row.product === "string" &&
+        typeof row.quantity === "number" &&
+        typeof row.sales === "number" &&
+        typeof row.promoted === "boolean" &&
+        isRecord(row.raw) &&
+        Object.values(row.raw).every((cell) => typeof cell === "string"),
+    ) &&
+    Array.isArray(invalidRows) &&
+    invalidRows.every(
+      (row) =>
+        isRecord(row) &&
+        typeof row.rowNumber === "number" &&
+        Array.isArray(row.reasons) &&
+        row.reasons.every((reason) => typeof reason === "string"),
+    ) &&
+    Array.isArray(headers) &&
+    headers.every((header) => typeof header === "string") &&
+    typeof value.hasPromotion === "boolean"
+  );
+}
+
+function loadSavedAnalysis(): { parsed: ParsedSales | null; fileName: string; error: string } {
+  try {
+    const saved = window.localStorage.getItem(STORAGE_KEY);
+    if (!saved) return { parsed: null, fileName: "", error: "" };
+
+    const value: unknown = JSON.parse(saved);
+    if (
+      !isRecord(value) ||
+      value.version !== 1 ||
+      typeof value.fileName !== "string" ||
+      !isParsedSales(value.parsed)
+    ) {
+      return {
+        parsed: null,
+        fileName: "",
+        error: "Saved analysis data is invalid. Upload the CSV again to continue.",
+      };
+    }
+
+    return { parsed: value.parsed, fileName: value.fileName, error: "" };
+  } catch (caught) {
+    return {
+      parsed: null,
+      fileName: "",
+      error: `Could not restore saved analysis: ${
+        caught instanceof Error ? caught.message : "local storage is unavailable"
+      }`,
+    };
+  }
+}
 
 const aliases = {
   date: ["date", "sales date", "order date", "transaction date"],
@@ -171,11 +247,13 @@ function parseSalesCsv(file: File): Promise<ParsedSales> {
 }
 
 function App() {
+  const [savedAnalysis] = useState(loadSavedAnalysis);
   const fileInput = useRef<HTMLInputElement>(null);
-  const [parsed, setParsed] = useState<ParsedSales | null>(null);
-  const [fileName, setFileName] = useState("");
+  const [parsed, setParsed] = useState<ParsedSales | null>(savedAnalysis.parsed);
+  const [fileName, setFileName] = useState(savedAnalysis.fileName);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [storageError, setStorageError] = useState(savedAnalysis.error);
   const [dateFilter, setDateFilter] = useState("");
   const [retailerFilter, setRetailerFilter] = useState("");
   const [productFilter, setProductFilter] = useState("");
@@ -218,6 +296,21 @@ function App() {
       : (filteredRows.filter((row) => row.promoted).length / filteredRows.length) * 100;
   const retailerOptions = [...new Set((parsed?.rows ?? []).map((row) => row.retailer))].sort();
   const productOptions = [...new Set((parsed?.rows ?? []).map((row) => row.product))].sort();
+
+  useEffect(() => {
+    if (!parsed || !fileName) return;
+    try {
+      const saved: SavedAnalysis = { version: 1, parsed, fileName };
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+      setStorageError("");
+    } catch (caught) {
+      setStorageError(
+        `Could not save analysis: ${
+          caught instanceof Error ? caught.message : "local storage is unavailable"
+        }`,
+      );
+    }
+  }, [parsed, fileName]);
 
   function downloadFilteredCsv() {
     if (!parsed) return;
@@ -272,6 +365,7 @@ function App() {
               />
               <p className="upload-hint">Required: Date, Retailer, Product, Units Sold, and Total Sales.</p>
               {error && <div className="error-message" role="alert">{error}</div>}
+              {storageError && <div className="error-message" role="alert">{storageError}</div>}
             </section>
           ) : (
             <>
@@ -288,6 +382,7 @@ function App() {
                   </button>
                 </div>
               </section>
+              {storageError && <div className="error-message inline-error" role="alert">{storageError}</div>}
               {parsed.invalidRows.length > 0 && (
                 <section className="validation-warning">
                   <div className="warning-copy">
