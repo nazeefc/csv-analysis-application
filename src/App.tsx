@@ -167,6 +167,10 @@ function App() {
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [dateFilter, setDateFilter] = useState("");
+  const [retailerFilter, setRetailerFilter] = useState("");
+  const [productFilter, setProductFilter] = useState("");
+  const [showInvalidRows, setShowInvalidRows] = useState(false);
 
   async function handleFile(file?: File) {
     if (!file) return;
@@ -189,6 +193,22 @@ function App() {
       setIsLoading(false);
     }
   }
+
+  const filteredRows = (parsed?.rows ?? []).filter(
+    (row) =>
+      (!dateFilter || row.date === dateFilter) &&
+      (!retailerFilter || row.retailer === retailerFilter) &&
+      (!productFilter || row.product === productFilter),
+  );
+  const totalQuantity = filteredRows.reduce((sum, row) => sum + row.quantity, 0);
+  const totalSales = filteredRows.reduce((sum, row) => sum + row.sales, 0);
+  const averagePrice = totalQuantity === 0 ? 0 : totalSales / totalQuantity;
+  const promotionPercentage =
+    filteredRows.length === 0 || !parsed?.hasPromotion
+      ? 0
+      : (filteredRows.filter((row) => row.promoted).length / filteredRows.length) * 100;
+  const retailerOptions = [...new Set((parsed?.rows ?? []).map((row) => row.retailer))].sort();
+  const productOptions = [...new Set((parsed?.rows ?? []).map((row) => row.product))].sort();
 
   return (
     <div className="app-shell">
@@ -230,25 +250,110 @@ function App() {
               </section>
               {parsed.invalidRows.length > 0 && (
                 <section className="validation-warning">
-                  {parsed.invalidRows.length} invalid rows skipped
+                  <div className="warning-copy">
+                    <span className="warning-mark">!</span>
+                    <span>
+                      <strong>{parsed.invalidRows.length} invalid rows skipped</strong>
+                      <small>Invalid rows are excluded from your analysis.</small>
+                    </span>
+                  </div>
+                  <button
+                    className="text-button"
+                    onClick={() => setShowInvalidRows((visible) => !visible)}
+                  >
+                    {showInvalidRows ? "Hide details" : "View details"}
+                  </button>
+                </section>
+              )}
+              {showInvalidRows && parsed.invalidRows.length > 0 && (
+                <section className="invalid-panel">
+                  <strong>Invalid rows</strong>
                   <div className="invalid-list">
                     {parsed.invalidRows.map((row) => (
                       <div className="invalid-row" key={row.rowNumber}>
-                        Row {row.rowNumber}: {row.reasons.join(" · ")}
+                        <span>Row {row.rowNumber}</span>
+                        <span>{row.reasons.join(" · ")}</span>
                       </div>
                     ))}
                   </div>
                 </section>
               )}
+              <section className="filter-panel">
+                <div className="filter-heading">
+                  <span className="filter-label">Filter sales data</span>
+                  <span className="filter-count">
+                    {filteredRows.length} of {parsed.rows.length} valid rows
+                  </span>
+                </div>
+                <div className="filter-controls">
+                  <label className="filter-control">
+                    <span>Date</span>
+                    <input
+                      type="date"
+                      value={dateFilter}
+                      onChange={(event) => setDateFilter(event.target.value)}
+                    />
+                  </label>
+                  <label className="filter-control">
+                    <span>Retailer</span>
+                    <select value={retailerFilter} onChange={(event) => setRetailerFilter(event.target.value)}>
+                      <option value="">All retailers</option>
+                      {retailerOptions.map((retailer) => <option key={retailer}>{retailer}</option>)}
+                    </select>
+                  </label>
+                  <label className="filter-control">
+                    <span>Product</span>
+                    <select value={productFilter} onChange={(event) => setProductFilter(event.target.value)}>
+                      <option value="">All products</option>
+                      {productOptions.map((product) => <option key={product}>{product}</option>)}
+                    </select>
+                  </label>
+                  {(dateFilter || retailerFilter || productFilter) && (
+                    <button
+                      className="reset-button"
+                      onClick={() => {
+                        setDateFilter("");
+                        setRetailerFilter("");
+                        setProductFilter("");
+                      }}
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+              </section>
+
+              <section className="metrics-grid">
+                <article className="metric-card">
+                  <div className="metric-top">Total quantity</div>
+                  <strong>{totalQuantity.toLocaleString()}</strong>
+                  <small>Units sold in selected data</small>
+                </article>
+                <article className="metric-card">
+                  <div className="metric-top">Total sales value</div>
+                  <strong>{totalSales.toLocaleString(undefined, { style: "currency", currency: "USD" })}</strong>
+                  <small>Revenue in selected data</small>
+                </article>
+                <article className="metric-card">
+                  <div className="metric-top">Average selling price</div>
+                  <strong>{averagePrice.toLocaleString(undefined, { style: "currency", currency: "USD" })}</strong>
+                  <small>Sales value per unit</small>
+                </article>
+                <article className="metric-card">
+                  <div className="metric-top">Promotion percentage</div>
+                  <strong>{parsed.hasPromotion ? `${promotionPercentage.toFixed(1)}%` : "N/A"}</strong>
+                  <small>{parsed.hasPromotion ? "Rows marked as promoted" : "No promotion column"}</small>
+                </article>
+              </section>
               <section className="table-card">
                 <div className="section-heading"><h2>Validated sales rows</h2></div>
                 <div className="table-scroll">
                   <table>
                     <thead><tr><th>Date</th><th>Retailer</th><th>Product</th><th>Quantity</th><th>Sales</th></tr></thead>
                     <tbody>
-                      {parsed.rows.map((row, index) => (
+                      {filteredRows.map((row, index) => (
                         <tr key={`${row.date}-${row.retailer}-${index}`}>
-                          <td>{row.date}</td><td>{row.retailer}</td><td>{row.product}</td><td>{row.quantity}</td><td>{row.sales}</td>
+                          <td>{row.date}</td><td>{row.retailer}</td><td>{row.product}</td><td>{row.quantity}</td><td>{row.sales.toLocaleString(undefined, { style: "currency", currency: "USD" })}</td>
                         </tr>
                       ))}
                     </tbody>
